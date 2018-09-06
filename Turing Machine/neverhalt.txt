@@ -1,0 +1,16 @@
+transitions:
+q0:|/|,r-q1
+q1:a/b,r-q2
+q1:b/b,r-q4
+q2:b/a,l-q3
+q2:a/b,l-q1
+q3:b/a,r-q2
+q3:a/a,r-q4
+
+accepting:
+q4
+
+rejecting:
+
+input:
+ab
