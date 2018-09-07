@@ -1,3 +1,5 @@
+Compilation requires instilation of LEMON C++ graph library
+
 Compile: g++ <C++ file> -o <executable> -lemon
 
 Run: ./<executable> [params]

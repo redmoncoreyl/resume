@@ -24,4 +24,4 @@ q8
 rejecting:
 
 input:
-ab
+abb
