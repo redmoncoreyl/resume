@@ -8,7 +8,8 @@ assumes the program is syntactically correct.
 The syntax is similar to C. The only variable data type is int.
 Lines are terminated with a new line, not ";"
 
-Programs are terminated with the "exit" keyword.
+Control structures if and while are terminated with "end"
+keyword. Programs are terminated with the "exit" keyword.
 
 Supported structures:
   receiving input with "in" keyword
