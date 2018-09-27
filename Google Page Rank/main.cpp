@@ -1,187 +1,185 @@
-#include <cstdio>
-#include "pageset.h"
-#include "wordset.h"
-#include <cstring>
 #include <iostream>
 #include <fstream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <algorithm>
 
 using namespace std;
 
-// read file to create web hash table
-Pageset *loadWeb() {
-	//determine number of pages
-	int webSize = 0;
-	ifstream fin;
-	string s;
-	fin.open("webpages.txt");
-	while (fin >> s) {
-		if (s == "NEWPAGE") {
-			webSize++;
-		}
-	}
-	fin.close();
-	
-	// insert all pages
-	Pageset *Web = new Pageset(webSize);
-	Page *curPage = NULL;
-	sNode *curWord = NULL;
-	sNode *curLink = NULL;
-	Page *linkPage = NULL;
-	
-	fin.open("webpages.txt");
-	while (fin >> s) {
-		if (s == "NEWPAGE") {
-			fin >> s;
-			Web->insert(s);
-		}
-	}
-	fin.close();
-	
-	// insert all words and links
-		//this must be done separately from inserting all pages so that
-		//it will be able to insert links that are NEWPAGE forward references
-	fin.open("webpages.txt");
-	while (fin >> s) {
-		if (s == "NEWPAGE") {
-			fin >> s;
-			curPage = Web->find(s);
-		} else {
-			if (s.find("http://") != string::npos) {
-				if (linkPage = Web->find(s)) {
-					curLink = new sNode(s, curPage->links);
-					curLink->linkPage = linkPage;
-					curPage->nLinks++;
-					
-					curPage->links = curLink;
-				}
-			} else {
-				curWord = new sNode(s, curPage->words);
-				curPage->words = curWord;
-			}
-		}
-	}
-	fin.close();
-	
-	return Web;
+// for the list of links on a page
+struct linkNode {
+  int page;
+  linkNode *next;
+  linkNode(int p, linkNode *n) {page = p; next = n;}
+};
+
+// for the list of pages a word is on
+struct pageNode {
+  int page;
+  pageNode *next;
+  pageNode(int k, pageNode *n) {page = k; next = n;}
+};
+
+struct Page {
+  string URL;
+  linkNode *links;
+  int nLinks;
+  double weight;
+  double newWeight;
+  int scaledWeight;
+  Page(string s) {URL = s; links = NULL; nLinks = 0;}
+};
+
+struct Word {
+  pageNode *pageList;
+  Word() {pageList = NULL;}
+};
+
+vector <Page*> pages;
+vector <Word*> words;
+unordered_map <string, int> urlPages;
+unordered_map <string, int> wordMap;
+int N_pages;
+
+void readPages() {
+  // build hash table of NEWPAGE links
+  ifstream fin;
+  fin.open("webpages.txt");
+  int i = 0;
+  string s;
+  while (fin >> s) {
+    if (s == "NEWPAGE") {
+      fin >> s;
+      urlPages[s] = i++;
+    }
+  }
+  fin.close();
+  N_pages = i;
+  pages.reserve(N_pages);
+
+  // build vector of pages
+  fin.open("webpages.txt");
+  Page* curPage = NULL;
+  while (fin >> s) {
+    if (s == "NEWPAGE") {
+      fin >> s;
+      curPage = new Page(s);
+      pages.push_back(curPage);
+    } else {
+      if (s.find("http://") != string::npos) {
+        if (urlPages.find(s) != urlPages.end()) {
+          curPage->nLinks++;
+          curPage->links = new linkNode(urlPages[s], curPage->links);
+        }
+      }
+    }
+  }
+  fin.close();
+  cout << "Loaded webpages" << endl;
 }
 
-Wordset *loadInvertedWeb(Pageset *theWeb) {
-	// count all unique words
-	int wordSize = 0;
-	ifstream fin;
-	string s;
-	fin.open("webpages.txt");
-	while (fin >> s) {
-		if (s != "NEWPAGE") {
-			if(s.find("http://") == string::npos) {
-				wordSize++;
-			}
-		}
-	}
-	fin.close();
-	
-	// create a list of copy of Pages from which each word comes from
-	Wordset *invertedWeb = new Wordset(wordSize);
-	Page *curPage = NULL;
-	sNode *curWord = NULL;
-	Page *pageCopy = NULL;
-	
-	fin.open("webpages.txt");
-	while (fin >> s) {
-		if (s == "NEWPAGE") {
-			fin >> s;
-			curPage = theWeb->find(s);
-		} else {
-			if (s.find("http://") == string::npos) {
-				if (curWord = invertedWeb->find(s)) {
-					pageCopy = new Page(curPage->URL, curWord->pages, curPage->weight);
-					curWord->pages = pageCopy;
-				} else {
-					curWord = invertedWeb->insert(s);
-					curWord->pages = NULL;
-					pageCopy = new Page(curPage->URL, curWord->pages, curPage->weight);
-					curWord->pages = pageCopy;
-				}
-			}
-		}
-	}
-	fin.close();
-	
-	return invertedWeb;
+// Give each page initial weight 1 / N
+// Repeat 50 times:
+//   For each page i, set new_weight[i] = 0.1 / N.
+//   For each page i,
+//     For each page j (of t total) to which i links,
+//       Increase new_weight[j] by 0.9 * weight[i] / t.
+//   For each page i, set weight[i] = new_weight[i].
+void rankPages() {
+  for (int i = 0; i < (int)pages.size(); i++) {
+    pages[i]->weight = 1.0/N_pages;
+  }
+  for (int k = 0; k < 50; k++) {
+    for (int i = 0; i < (int)pages.size(); i++) {
+      pages[i]->newWeight = 0.1/N_pages;
+    }
+    for (int i = 0; i < (int)pages.size(); i++) {
+      linkNode *curLink = pages[i]->links;
+      while (curLink != NULL) {
+        Page *linkPage = pages[curLink->page];
+        linkPage->newWeight += 0.9*pages[i]->weight/pages[i]->nLinks;
+        curLink = curLink->next;
+      }
+    }
+    for (int i = 0; i < (int)pages.size(); i++) {
+      pages[i]->weight = pages[i]->newWeight;
+    }
+  }
+
+  // compute scaled weights
+  for (int i = 0; i < (int)pages.size(); i++) {
+    pages[i]->scaledWeight = (int)(100.0*pages[i]->weight*N_pages);
+  }
+  cout << "Ranked webpages" << endl;
 }
 
+void indexPages() {
+  ifstream fin;
+  fin.open("webpages.txt");
+  int curPage = 0;
+  string s;
+  int i = 0;
+  while (fin >> s) {
+    if (s == "NEWPAGE") {
+      fin >> s;
+      curPage = urlPages[s];
+    } else {
+      if (s.find("http://") == string::npos) {
+        if (wordMap.find(s) == wordMap.end()) {
+          wordMap[s] = i++;
+          words.push_back(new Word());
+        }
+        Word *curWord = words[wordMap[s]];
+        curWord->pageList = new pageNode(curPage, curWord->pageList);
+      }
+    }
+  }
+  fin.close();
+  cout << "Loaded word index" << endl;
+}
 
-// The following functions sort page lists and are slightly modified from class
-Page *merge(Page *pList1, Page *pList2)
-{
-  if (pList1 == NULL) return pList2;
-  if (pList2 == NULL) return pList1;
-  if (pList1->weight > pList2->weight) {
-    pList1->next = merge(pList1->next, pList2);
-    return pList1;
-  } else {
-    pList2->next = merge(pList2->next, pList1);
-    return pList2;
+bool pageComp(Page *a, Page *b) {
+  return (a->weight > b->weight);
+}
+
+string lowerString(string s) {
+  std::transform(s.begin(), s.end(), s.begin(), 
+    [](unsigned char c){ return std::tolower(c); });
+  return s;
+}
+
+void getInput() {
+  string s;
+  cout << "\nInput search word: ";
+  while (cin >> s) {
+    s = lowerString(s);
+    if (wordMap.find(s) != wordMap.end()) {
+      Word *curWord = words[wordMap[s]];
+      vector <Page*> results;
+      pageNode *curPage = curWord->pageList;
+      while (curPage != NULL) {
+        results.push_back(pages[curPage->page]);
+        curPage = curPage->next;
+      }
+      sort(results.begin(), results.end(), pageComp);
+      cout << "Showing " << min(25, (int)results.size());
+      cout << " of " << (int)results.size() << " results.\n";
+      for (int i = 0; i < min(25, (int)results.size()); i++) {
+        cout << (results[i]->scaledWeight) << " ";
+        cout << results[i]->URL << endl;
+      }
+    } else {
+      cout << "\nCould not find word" << endl;
+    }
+    cout << "\nInput search word: ";
   }
 }
 
-Page *evens(Page *pList);
-Page *odds(Page *pList);
-
-Page *evens(Page *pList) 
-{
-  if (pList == NULL) return NULL;
-  return new Page(pList->URL, pList->weight, odds(pList->next));
-}
-
-Page *odds(Page *pList) 
-{
-  if (pList == NULL) return NULL;
-  return evens(pList->next);
-}
-
-Page *merge_sort(Page *pList)
-{
-  if (pList == NULL) return NULL;     // empty
-  if (pList->next == NULL) return pList;  // 1 element
-  return merge(merge_sort(evens(pList)), merge_sort(odds(pList)));
-}
-
-
-//----------MAIN-----------//
-int main(void) {
-	// load Web hash table class from file
-	Pageset *theWeb = loadWeb();
-	cout << "\nSuccessfully loaded web.\n\n";
-	
-	// page rank
-	theWeb->weighPages(50);
-	cout << "Successfully ranked pages.\n\n";
-	
-	// create word hash table from file
-	Wordset *invertedWeb = loadInvertedWeb(theWeb);
-	cout << "Successfully loaded inverted web.\n";
-	
-	// recieve input from user
-	string inp;
-	int curWeight;
-	sNode *foundWord = NULL;
-	Page *curPage = NULL;
-	cout << "\nPlease input word (QUITNOW to stop): ";
-	while (cin >> inp && inp != "QUITNOW") {
-		if (foundWord = invertedWeb->find(inp)) {
-			curPage = merge_sort(foundWord->pages);
-			while (curPage != NULL) {
-				curWeight = curPage->weight * 7500000;
-				cout << curWeight << " " << curPage->URL << endl;
-				curPage = curPage->next;
-			}
-		} else {
-			cout << "\nCould not find word" << endl;
-		}
-		cout << "\nPlease input word (QUITNOW to stop): ";
-	}
-	cout << "\nThank you for your searches.\n\n";
-
-	return(0);
+int main() {
+  readPages();
+  rankPages();
+  indexPages();
+  getInput();
+  return 0;
 }
